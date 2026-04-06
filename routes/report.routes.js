@@ -20,7 +20,7 @@ router.get("/", async (req, res) => {
       db.query(`
         SELECT 
           COUNT(*) AS totalInvoices,
-          IFNULL(SUM(total_amount), 0) AS totalRevenue
+          IFNULL(SUM(final_amount), 0) AS totalRevenue
         FROM invoices
         WHERE payment_status = 'paid'
       `),

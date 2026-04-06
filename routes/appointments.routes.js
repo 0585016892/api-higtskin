@@ -144,9 +144,11 @@ router.post("/", async (req, res) => {
       note,
     } = req.body;
 
-    // 1. Kiểm tra bắt buộc
+    // 1️⃣ Kiểm tra bắt buộc
     if (!service_id || !appointment_time) {
-      return res.status(400).json({ message: "Thiếu dịch vụ hoặc thời gian hẹn" });
+      return res.status(400).json({
+        message: "Thiếu dịch vụ hoặc thời gian hẹn"
+      });
     }
 
     let finalCustomerId = customer_id;
@@ -154,30 +156,39 @@ router.post("/", async (req, res) => {
     let customerPhone = phone;
     let customerEmail = email;
 
-    // 2. Xử lý Khách hàng (Tạo mới hoặc Lấy khách cũ)
+    // 2️⃣ Xử lý khách hàng
     if (!finalCustomerId) {
       if (!full_name || !phone) {
-        return res.status(400).json({ message: "Cần thông tin họ tên và SĐT khách hàng" });
+        return res.status(400).json({
+          message: "Cần họ tên và số điện thoại khách hàng"
+        });
       }
 
-      // Check SĐT đã tồn tại chưa
-      const [existing] = await db.query("SELECT id, full_name, email FROM customers WHERE phone = ?", [phone]);
-      
+      const [existing] = await db.query(
+        "SELECT id, full_name, email FROM customers WHERE phone = ?",
+        [phone]
+      );
+
       if (existing.length > 0) {
         finalCustomerId = existing[0].id;
         customerName = existing[0].full_name;
         customerEmail = existing[0].email || email;
       } else {
-        // Tạo khách hàng mới
-        const [newCust] = await db.query(
-          `INSERT INTO customers (full_name, phone, email, skin_type, skin_issue) VALUES (?, ?, ?, ?, ?)`,
-          [full_name, phone, email || null, skin_type || null, skin_issue || null]
+        const [newCustomer] = await db.query(
+          `INSERT INTO customers 
+          (full_name, phone, email, skin_type, skin_issue, membership_id)
+          VALUES (?, ?, ?, ?, ?, 4)`,
+          [full_name, phone, email || null, skin_type || null, skin_issue || null, 4]
         );
-        finalCustomerId = newCust.insertId;
+
+        finalCustomerId = newCustomer.insertId;
       }
     } else {
-      // Nếu Admin chọn customer_id từ list, lấy lại tên/email để gửi mail
-      const [custInfo] = await db.query("SELECT full_name, phone, email FROM customers WHERE id = ?", [finalCustomerId]);
+      const [custInfo] = await db.query(
+        "SELECT full_name, phone, email FROM customers WHERE id=?",
+        [finalCustomerId]
+      );
+
       if (custInfo.length > 0) {
         customerName = custInfo[0].full_name;
         customerPhone = custInfo[0].phone;
@@ -185,81 +196,131 @@ router.post("/", async (req, res) => {
       }
     }
 
-    // 3. Kiểm tra Dịch vụ (Lấy luôn tên để gửi mail)
-    const [[service]] = await db.query("SELECT id, name, price FROM services WHERE id=? AND status=1", [service_id]);
-    if (!service) return res.status(400).json({ message: "Dịch vụ không tồn tại hoặc đã ngừng hoạt động" });
+    // 3️⃣ Kiểm tra dịch vụ
+    const [[service]] = await db.query(
+      "SELECT id, name, price FROM services WHERE id=? AND status=1",
+      [service_id]
+    );
 
-    // 4. Kiểm tra Nhân viên & Trùng lịch
+    if (!service) {
+      return res.status(400).json({
+        message: "Dịch vụ không tồn tại hoặc đã ngừng"
+      });
+    }
+
+    // 4️⃣ Kiểm tra tối đa 3 khách / 1 giờ
+    const [[{ totalAppointments }]] = await db.query(
+      `SELECT COUNT(*) as totalAppointments
+       FROM appointments
+       WHERE appointment_time = ?
+       AND status != 'cancelled'`,
+      [appointment_time]
+    );
+
+    if (totalAppointments >= 3) {
+      return res.status(400).json({
+        message: "Khung giờ đã kín lịch, vui lòng chọn giờ khác"
+      });
+    }
+
+    // 5️⃣ Kiểm tra KTV
     const finalStaffId = (staff_id && staff_id !== "null") ? staff_id : null;
     let staffName = "Hệ thống tự sắp xếp";
 
     if (finalStaffId) {
-      const [[staff]] = await db.query("SELECT full_name FROM users WHERE id = ?", [finalStaffId]);
+      const [[staff]] = await db.query(
+        "SELECT full_name FROM users WHERE id=?",
+        [finalStaffId]
+      );
+
       staffName = staff ? staff.full_name : "N/A";
 
       const [[{ total }]] = await db.query(
-        `SELECT COUNT(*) as total FROM appointments 
-         WHERE staff_id = ? AND appointment_time = ? AND status != 'cancelled'`,
+        `SELECT COUNT(*) as total
+         FROM appointments
+         WHERE staff_id = ?
+         AND appointment_time = ?
+         AND status != 'cancelled'`,
         [finalStaffId, appointment_time]
       );
-      if (total > 0) return res.status(400).json({ message: "Kỹ thuật viên này đã có lịch vào khung giờ bạn chọn" });
+
+      if (total > 0) {
+        return res.status(400).json({
+          message: "Kỹ thuật viên đã có lịch trong giờ này"
+        });
+      }
     }
 
-    // 5. Lưu Lịch hẹn vào Database
-    await db.query(
-      `INSERT INTO appointments 
-       (customer_id, service_id, staff_id, appointment_time, status, note)
-       VALUES (?, ?, ?, ?, 'pending', ?)`,
-      [finalCustomerId, service_id, finalStaffId, appointment_time, note || ""]
+    // 6️⃣ Lưu lịch hẹn
+    const [result] = await db.query(
+      `INSERT INTO appointments
+      (customer_id, service_id, staff_id, appointment_time, status, note)
+      VALUES (?, ?, ?, ?, 'pending', ?)`,
+      [
+        finalCustomerId,
+        service_id,
+        finalStaffId,
+        appointment_time,
+        note || ""
+      ]
     );
 
-    // 🚀 6. LOGIC GỬI MAIL (KHÔNG DÙNG AWAIT ĐỂ GIẢM ĐỘ TRỄ PHẢN HỒI)
+    const appointmentId = result.insertId;
+
+    // 7️⃣ Gửi email xác nhận
     if (customerEmail) {
       const mailOptions = {
         from: '"HighSkin Spa" <your-email@gmail.com>',
         to: customerEmail,
         subject: `[HighSkin] Xác nhận đặt lịch: ${service.name}`,
         html: `
-          <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #f0f0f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-            <div style="background: linear-gradient(135deg, #eb2f96 0%, #722ed1 100%); padding: 30px; text-align: center; color: white;">
-              <h2 style="margin: 0; letter-spacing: 2px;">XÁC NHẬN ĐẶT LỊCH</h2>
+          <div style="font-family:Arial;max-width:600px;margin:auto;border:1px solid #eee;border-radius:10px">
+            <div style="background:#eb2f96;color:white;padding:20px;text-align:center">
+              <h2>XÁC NHẬN ĐẶT LỊCH</h2>
             </div>
-            <div style="padding: 30px; color: #333;">
-              <p>Xin chào <strong>${customerName}</strong>,</p>
-              <p>Chúc mừng bạn! Lịch hẹn chăm sóc da tại <strong>HighSkin Spa</strong> đã được ghi nhận thành công.</p>
-              
-              <div style="background: #fff5f9; border-radius: 8px; padding: 20px; margin: 20px 0; border-left: 4px solid #eb2f96;">
-                <p style="margin: 5px 0;"><strong>Dịch vụ:</strong> ${service.name}</p>
-                <p style="margin: 5px 0;"><strong>Thời gian:</strong> ${appointment_time}</p>
-                <p style="margin: 5px 0;"><strong>Kỹ thuật viên:</strong> ${staffName}</p>
-                <p style="margin: 5px 0;"><strong>Giá tham khảo:</strong> ${Number(service.price).toLocaleString()}₫</p>
+
+            <div style="padding:20px">
+              <p>Xin chào <b>${customerName}</b>,</p>
+              <p>Lịch hẹn tại <b>HighSkin Spa</b> đã được ghi nhận.</p>
+
+              <div style="background:#fff5f9;padding:15px;border-left:4px solid #eb2f96">
+                <p><b>Dịch vụ:</b> ${service.name}</p>
+                <p><b>Thời gian:</b> ${appointment_time}</p>
+                <p><b>Kỹ thuật viên:</b> ${staffName}</p>
+                <p><b>Giá tham khảo:</b> ${Number(service.price).toLocaleString()}₫</p>
               </div>
 
-              <p style="font-size: 13px; color: #666; font-style: italic;">
-                * Lưu ý: Vui lòng đến trước lịch hẹn 10 phút để chúng tôi phục vụ bạn tốt nhất. 
-                Nếu có thay đổi, vui lòng liên hệ hotline: <strong>033 604 1807</strong>
+              <p style="font-size:13px;color:#777">
+                Vui lòng đến trước 10 phút. Hotline: 033 604 1807
               </p>
             </div>
-            <div style="background: #fafafa; padding: 20px; text-align: center; color: #999; font-size: 12px;">
-              © 2026 HighSkin Spa - Chuẩn Y Khoa. Tất cả quyền được bảo lưu.
+
+            <div style="background:#fafafa;padding:15px;text-align:center;font-size:12px;color:#888">
+              © 2026 HighSkin Spa
             </div>
           </div>
-        `,
+        `
       };
 
-      transporter.sendMail(mailOptions).catch(err => console.error("❌ Email Error:", err));
+      transporter.sendMail(mailOptions).catch(err =>
+        console.error("Email Error:", err)
+      );
     }
 
-    // 7. Phản hồi cho Client
-    res.json({ 
+    // 8️⃣ Trả kết quả
+    res.json({
       success: true,
-      message: "Đặt lịch thành công!", 
-      customer_id: finalCustomerId 
+      message: "Đặt lịch thành công",
+      appointment_id: appointmentId,
+      customer_id: finalCustomerId
     });
 
   } catch (err) {
-    console.error("❌ SERVER ERROR:", err);
-    res.status(500).json({ message: "Lỗi hệ thống, vui lòng thử lại sau" });
+    console.error("SERVER ERROR:", err);
+
+    res.status(500).json({
+      message: "Lỗi hệ thống, vui lòng thử lại sau"
+    });
   }
 });
 /**
@@ -336,88 +397,146 @@ router.put("/:id/cancel", async (req, res) => {
  */
 router.put("/:id/complete", async (req, res) => {
   const conn = await db.getConnection();
+
   try {
+
+    const appointmentId = parseInt(req.params.id);
+
+    if (!appointmentId) {
+      return res.status(400).json({
+        success: false,
+        message: "ID lịch hẹn không hợp lệ"
+      });
+    }
+
     await conn.beginTransaction();
 
     // 1️⃣ Lấy appointment + service
-    const [[appt]] = await conn.query(
+    const [rows] = await conn.query(
       `
       SELECT 
-        a.*, 
-        s.name AS service_name, 
+        a.id,
+        a.customer_id,
+        a.staff_id,
+        a.service_id,
+        a.status,
+        s.name AS service_name,
         s.price
       FROM appointments a
       JOIN services s ON a.service_id = s.id
       WHERE a.id = ?
       `,
-      [req.params.id]
+      [appointmentId]
     );
 
-    if (!appt) {
+    if (rows.length === 0) {
       await conn.rollback();
       return res.status(404).json({
-        message: "Không tìm thấy lịch hẹn",
+        success: false,
+        message: "Không tìm thấy lịch hẹn"
       });
     }
 
+    const appt = rows[0];
+
+    // 2️⃣ Check trạng thái
     if (appt.status !== "confirmed") {
       await conn.rollback();
       return res.status(400).json({
-        message: "Chỉ được hoàn thành lịch đã xác nhận",
+        success: false,
+        message: "Chỉ lịch hẹn đã xác nhận mới được hoàn thành"
       });
     }
 
-    // 2️⃣ Update appointment
-    await conn.query(
-      `UPDATE appointments SET status='completed' WHERE id=?`,
-      [appt.id]
+    // 3️⃣ Check staff
+    if (!appt.staff_id) {
+      await conn.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Chưa gán nhân viên cho lịch hẹn"
+      });
+    }
+
+    // 4️⃣ Check invoice đã tồn tại chưa
+    const [existInvoice] = await conn.query(
+      `SELECT id FROM invoices WHERE appointment_id = ? LIMIT 1`,
+      [appointmentId]
     );
 
-    // 3️⃣ Tạo invoice (🔥 FIX Ở ĐÂY)
-    const [invoice] = await conn.query(
+    if (existInvoice.length > 0) {
+      await conn.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Hóa đơn đã tồn tại cho lịch hẹn này"
+      });
+    }
+
+    // 5️⃣ Update appointment
+    await conn.query(
+      `UPDATE appointments SET status = 'completed' WHERE id = ?`,
+      [appointmentId]
+    );
+
+    // 6️⃣ Create invoice
+    const [invoiceResult] = await conn.query(
       `
       INSERT INTO invoices
-        (appointment_id, customer_id, staff_id, total_amount)
-      VALUES (?, ?, ?, ?)
+      (appointment_id, customer_id, staff_id, total_amount, payment_status)
+      VALUES (?, ?, ?, ?, 'unpaid')
       `,
       [
         appt.id,
         appt.customer_id,
         appt.staff_id,
-        appt.price,
+        appt.price
       ]
     );
 
-    // 4️⃣ Tạo invoice_items
+    const invoiceId = invoiceResult.insertId;
+
+    // 7️⃣ Create invoice item
     await conn.query(
       `
       INSERT INTO invoice_items
-        (invoice_id, service_id, service_name, price, quantity, total)
-      VALUES (?, ?, ?, ?, 1, ?)
+      (invoice_id, service_id, service_name, price, quantity, total)
+      VALUES (?, ?, ?, ?, ?, ?)
       `,
       [
-        invoice.insertId,
+        invoiceId,
         appt.service_id,
         appt.service_name,
         appt.price,
-        appt.price,
+        1,
+        appt.price
       ]
     );
 
     await conn.commit();
 
-    res.json({
-      message: "Hoàn thành lịch & tạo hoá đơn thành công",
-      invoice_id: invoice.insertId,
+    return res.json({
+      success: true,
+      message: "Hoàn thành lịch hẹn và tạo hóa đơn thành công",
+      data: {
+        invoice_id: invoiceId,
+        appointment_id: appointmentId
+      }
     });
+
   } catch (err) {
+
     await conn.rollback();
-    console.error(err);
-    res.status(500).json({
-      message: "Server error",
+
+    console.error("COMPLETE APPOINTMENT ERROR:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi server"
     });
+
   } finally {
+
     conn.release();
+
   }
 });
 
