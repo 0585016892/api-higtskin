@@ -78,7 +78,7 @@ router.post("/", async (req, res) => {
 console.log(req.body);
 
   try {
-    const { full_name, phone, email, skin_type, skin_issue, note ,membership_id} = req.body;
+    const { full_name, phone, email, skin_type, skin_issue, note ,membership_id = 4 } = req.body;
 
     if (!full_name || !phone) {
       return res.status(400).json({ message: "Thiếu dữ liệu bắt buộc" });

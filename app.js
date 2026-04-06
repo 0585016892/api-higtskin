@@ -65,6 +65,8 @@ app.use("/api/dashboard", require("./routes/dashboard.routes"));
 app.use("/api/report", require("./routes/report.routes"));
 app.use("/api/settings", require("./routes/settings.routes"));
 app.use("/api/membership", require("./routes/membership.routes"));
+app.use("/api/chatbot", require("./routes/chatbot"));
+app.use("/api/chatbotImage", require("./routes/chatImage"));
 app.get("/", (req, res) => {
   res.send("🚀 Highskin Spa API running");
 });

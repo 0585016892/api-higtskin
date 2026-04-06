@@ -11,17 +11,31 @@ const db = require("../db");
  * PUT /api/invoices/:id/pay
  */
 router.put("/:id/pay", async (req, res) => {
-  const { payment_method } = req.body;
+  try {
 
-  await db.query(`
-    UPDATE invoices
-    SET payment_status='paid', payment_method=?
-    WHERE id=?
-  `, [payment_method, req.params.id]);
+    const { payment_method, final_amount } = req.body;
 
-  res.json({ message: "Thanh toán thành công" });
+    await db.query(`
+      UPDATE invoices
+      SET 
+        payment_status = 'paid',
+        payment_method = ?,
+        final_amount = ?
+      WHERE id = ?
+    `, [payment_method, final_amount, req.params.id]);
+
+    res.json({
+      message: "Thanh toán thành công"
+    });
+
+  } catch (err) {
+
+    res.status(500).json({
+      message: err.message
+    });
+
+  }
 });
-
 router.get("/", async (req, res) => {
   const [rows] = await db.query(`
     SELECT i.*, c.full_name customer_name, u.full_name staff_name
