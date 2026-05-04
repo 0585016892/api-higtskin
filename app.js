@@ -54,6 +54,8 @@ const pusher = new Pusher({
 //   }
 // });
 
+app.use(express.urlencoded({ extended: true }));
+app.use("/uploads", express.static("uploads"));
 /* ===== 3. ROUTES DỊCH VỤ ===== */
 app.use("/api/users", require("./routes/users.routes"));
 app.use("/api/customers", require("./routes/customers.routes"));
@@ -67,12 +69,13 @@ app.use("/api/settings", require("./routes/settings.routes"));
 app.use("/api/membership", require("./routes/membership.routes"));
 app.use("/api/chatbot", require("./routes/chatbot"));
 app.use("/api/chatbotImage", require("./routes/chatImage"));
+app.use("/api/products", require("./routes/productRoutes"));
 app.get("/", (req, res) => {
   res.send("🚀 Highskin Spa API running");
 });
 
 /* ===== START SERVER ===== */
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 12007;
 app.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
 });

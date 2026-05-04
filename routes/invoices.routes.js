@@ -10,32 +10,32 @@ const db = require("../db");
 /**
  * PUT /api/invoices/:id/pay
  */
-router.put("/:id/pay", async (req, res) => {
-  try {
+// router.put("/:id/pay", async (req, res) => {
+//   try {
 
-    const { payment_method, final_amount } = req.body;
+//     const { payment_method, final_amount } = req.body;
 
-    await db.query(`
-      UPDATE invoices
-      SET 
-        payment_status = 'paid',
-        payment_method = ?,
-        final_amount = ?
-      WHERE id = ?
-    `, [payment_method, final_amount, req.params.id]);
+//     await db.query(`
+//       UPDATE invoices
+//       SET 
+//         payment_status = 'paid',
+//         payment_method = ?,
+//         final_amount = ?
+//       WHERE id = ?
+//     `, [payment_method, final_amount, req.params.id]);
 
-    res.json({
-      message: "Thanh toán thành công"
-    });
+//     res.json({
+//       message: "Thanh toán thành công"
+//     });
 
-  } catch (err) {
+//   } catch (err) {
 
-    res.status(500).json({
-      message: err.message
-    });
+//     res.status(500).json({
+//       message: err.message
+//     });
 
-  }
-});
+//   }
+// });
 router.get("/", async (req, res) => {
   const [rows] = await db.query(`
     SELECT i.*, c.full_name customer_name, u.full_name staff_name
@@ -68,5 +68,88 @@ router.get("/:id", async (req, res) => {
     items,
   });
 });
+router.put("/:id/pay", async (req, res) => {
+  const connection = await db.getConnection();
+  await connection.beginTransaction();
 
+  try {
+    const invoiceId = Number(req.params.id);
+
+    const {
+      payment_method,
+      final_amount,
+      items
+    } = req.body;
+
+    if (!invoiceId) {
+      throw new Error("Invoice ID không hợp lệ");
+    }
+
+    await connection.query(
+      `
+      UPDATE invoices
+      SET 
+        payment_status = 'paid',
+        payment_method = ?,
+        final_amount = ?
+      WHERE id = ?
+      `,
+      [
+        payment_method || "cash",
+        Number(final_amount) || 0,
+        invoiceId
+      ]
+    );
+
+    await connection.query(
+      `DELETE FROM invoice_items WHERE invoice_id = ?`,
+      [invoiceId]
+    );
+
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new Error("Không có dịch vụ trong hóa đơn");
+    }
+console.log("ITEMS:", items);
+for (const item of items) {
+  const productId = item.product_id || null;
+  const serviceId = item.service_id || null;
+
+  if (!productId && !serviceId) {
+    throw new Error("Thiếu product_id/service_id");
+  }
+
+  const quantity = Number(item.quantity) || 1;
+  const price = Number(item.price) || 0;
+  const total = Number(item.total) || quantity * price;
+
+  await connection.query(
+    `
+    INSERT INTO invoice_items
+    (invoice_id, product_id, service_id,service_name, quantity, price, total)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    `,
+    [
+      invoiceId,
+      productId,
+      serviceId,
+      item.service_name || null,
+      quantity,
+      price,
+      total
+    ]
+  );
+}
+
+    await connection.commit();
+
+    res.json({ message: "Thanh toán thành công" });
+
+  } catch (err) {
+    await connection.rollback();
+    console.error("PAY ERROR:", err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    connection.release();
+  }
+});
 module.exports = router;
