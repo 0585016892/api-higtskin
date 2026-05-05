@@ -128,7 +128,7 @@ router.get("/:id", async (req, res) => {
 // 3️⃣ CREATE PRODUCT (UPLOAD ẢNH)
 // ======================================================
 router.post("/", upload.single("image"), async (req, res) => {
-    
+        
   try {
     const { name, price, stock, description, category_id } = req.body;
 

@@ -104,4 +104,39 @@ router.get("/", async (req, res) => {
   }
 });
 
+router.get("/corporate", async (req, res) => {
+  const { month } = req.query;
+  console.log(month);
+  
+  try {
+    const [rows] = await db.query(
+      `
+      SELECT 
+        DATE_FORMAT(created_at, '%Y-%m') as month,
+        SUM(final_amount) as revenue
+      FROM invoices
+      WHERE payment_status = 'paid'
+        AND DATE_FORMAT(created_at, '%Y-%m') = ?
+      `,
+      [month]
+    );
+
+    const revenue = rows[0]?.revenue || 0;
+
+    const tax_rate = 0.2; // 20% TNDN (demo)
+    const tax = Math.round(revenue * tax_rate);
+    const after_tax_profit = revenue - tax;
+
+    res.json({
+      month,
+      revenue,
+      tax_rate,
+      tax,
+      after_tax_profit
+    });
+
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
 module.exports = router;
